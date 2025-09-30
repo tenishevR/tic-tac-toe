@@ -58,5 +58,10 @@ composer dump-autoload -o
 ```bash
 
 ### Проект на Packagist
+
 https://packagist.org/packages/tenis/tic-tac-toe
 ```
+
+[https://packagist.org/packages/tenishevR/tic-tac-toe](https://packagist.org/packages/tenis/tic-tac-toe)
+```
+

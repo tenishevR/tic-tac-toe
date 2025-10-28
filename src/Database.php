@@ -2,73 +2,89 @@
 
 namespace Tenis\TicTacToe;
 
-use PDO;
+use RedBeanPHP\R as R;
 
 class Database
 {
-    private PDO $pdo;
-
     public function __construct(string $dbFile)
     {
-        $this->pdo = new PDO("sqlite:$dbFile");
-        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $this->initSchema();
+        R::setup("sqlite:$dbFile");
+        // Автоматически создаёт таблицы и поля при первом запуске
+        R::freeze(false);
     }
 
-    private function initSchema(): void
-    {
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS games (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT,
-                player_name TEXT,
-                human_symbol TEXT,
-                winner TEXT,
-                size INTEGER
-            );
-        ");
-        $this->pdo->exec("
-            CREATE TABLE IF NOT EXISTS moves (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id INTEGER,
-                move_number INTEGER,
-                player TEXT,
-                row INTEGER,
-                col INTEGER,
-                FOREIGN KEY(game_id) REFERENCES games(id)
-            );
-        ");
-    }
-
+    /**
+     * Сохранение игры и её ходов
+     */
     public function saveGame(array $gameData, array $moves): int
     {
-        $stmt = $this->pdo->prepare("
-            INSERT INTO games (date, player_name, human_symbol, winner, size)
-            VALUES (:date, :player_name, :human_symbol, :winner, :size)
-        ");
-        $stmt->execute($gameData);
-        $gameId = (int)$this->pdo->lastInsertId();
+        // Создаём объект игры
+        $game = R::dispense('games');
+        $game->date         = $gameData['date'];
+        $game->player_name  = $gameData['player_name'];
+        $game->human_symbol = $gameData['human_symbol'];
+        $game->winner       = $gameData['winner'];
+        $game->size         = $gameData['size'];
 
-        $stmtMove = $this->pdo->prepare("
-            INSERT INTO moves (game_id, move_number, player, row, col)
-            VALUES (:game_id, :move_number, :player, :row, :col)
-        ");
-        foreach ($moves as $move) {
-            $stmtMove->execute(array_merge(['game_id' => $gameId], $move));
+        // Добавляем ходы через связь ownMoves
+        foreach ($moves as $m) {
+            $move = R::dispense('moves');
+            $move->move_number = $m['move_number'];
+            $move->player      = $m['player'];
+            $move->row         = $m['row'];
+            $move->col         = $m['col'];
+
+            $game->ownMoves[] = $move;
         }
 
-        return $gameId;
+        return R::store($game);
     }
 
+    /**
+     * Получение списка игр
+     */
     public function getGames(): array
     {
-        return $this->pdo->query("SELECT * FROM games ORDER BY date DESC")->fetchAll(PDO::FETCH_ASSOC);
+        $games = R::findAll('games', 'ORDER BY date DESC');
+        $result = [];
+
+        foreach ($games as $g) {
+            $result[] = [
+                'id'           => $g->id,
+                'date'         => $g->date,
+                'player_name'  => $g->player_name,
+                'human_symbol' => $g->human_symbol,
+                'winner'       => $g->winner,
+                'size'         => $g->size
+            ];
+        }
+
+        return $result;
     }
 
+    /**
+     * Получение ходов конкретной игры
+     */
     public function getMoves(int $gameId): array
     {
-        $stmt = $this->pdo->prepare("SELECT * FROM moves WHERE game_id = :game_id ORDER BY move_number ASC");
-        $stmt->execute(['game_id' => $gameId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $game = R::load('games', $gameId);
+        if (!$game->id) {
+            return [];
+        }
+
+        $result = [];
+        foreach ($game->ownMoves as $m) {
+            $result[] = [
+                'move_number' => $m->move_number,
+                'player'      => $m->player,
+                'row'         => $m->row,
+                'col'         => $m->col
+            ];
+        }
+
+        // Сортируем по move_number на всякий случай
+        usort($result, fn($a, $b) => $a['move_number'] <=> $b['move_number']);
+
+        return $result;
     }
 }
